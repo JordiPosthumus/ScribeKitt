@@ -4,6 +4,11 @@ internal struct DashboardPreferencesView: View {
     @AppStorage("immediateRecording") private var immediateRecording = false
     @AppStorage(AppDefaults.Keys.transcriptionStreaming) private var transcriptionStreaming = true
     @AppStorage(AppDefaults.Keys.addTrailingSpace) private var addTrailingSpace = true
+    @AppStorage(AppDefaults.Keys.localhostSTTEnabled) private var localhostSTTEnabled = true
+    @AppStorage(AppDefaults.Keys.localhostSTTPort) private var localhostSTTPort = 8111
+    @StateObject private var localhostSTT = LocalSTTSettings.shared
+    @State private var portText = "8111"
+    @State private var portError: String?
     @AppStorage("autoBoostMicrophoneVolume") private var autoBoostMicrophoneVolume = true
     @AppStorage("playCompletionSound") private var playCompletionSound = true
     @AppStorage("transcriptionHistoryEnabled") private var transcriptionHistoryEnabled = true
@@ -94,6 +99,40 @@ internal struct DashboardPreferencesView: View {
                 Text("History")
             } footer: {
                 Text("View saved transcripts in the Transcripts tab.")
+            }
+
+            Section("Localhost transcription API") {
+                Toggle("Expose localhost transcription API", isOn: $localhostSTTEnabled)
+                    .onChange(of: localhostSTTEnabled) { _, _ in
+                        Task { await localhostSTT.apply() }
+                    }
+                HStack {
+                    TextField("Port (0 chooses an available port)", text: $portText)
+                    Button("Apply") {
+                        guard let port = Int(portText), (0...65535).contains(port) else {
+                            portError = "Enter a port from 0 to 65535"
+                            return
+                        }
+                        portError = nil
+                        localhostSTTPort = port
+                        Task { await localhostSTT.apply() }
+                    }
+                }
+                if let portError { Text(portError).foregroundStyle(.red) }
+                Text(localhostSTT.status).textSelection(.enabled)
+                HStack {
+                    Text(localhostSTT.tokenPath)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                    Button("Copy token path") { localhostSTT.copyTokenPath() }
+                }
+                Text("Shares the resident speech model with local apps. Dictation takes priority. The API returns 503 until the model is loaded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .task {
+                portText = String(localhostSTTPort)
+                await localhostSTT.apply()
             }
 
             Section("About") {

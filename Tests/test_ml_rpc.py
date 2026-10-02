@@ -13,17 +13,30 @@ from types import SimpleNamespace
 
 
 class RPCRegressionTests(unittest.TestCase):
+    def test_bad_api_preferences_do_not_break_dictation_daemon(self):
+        out, err = io.StringIO(), io.StringIO()
+        requests = '\n'.join(json.dumps(r) for r in [
+            {"id": 1, "method": "ping"}, {"id": 2, "method": "stt_status"}])
+        with patch.dict("os.environ", {"SCRIBE_STT_ENABLED": "1", "SCRIBE_STT_PORT": "-1"}), \
+             patch.object(sys, "stdin", io.StringIO(requests)), patch.object(sys, "stdout", out), \
+             patch.object(sys, "stderr", err):
+            self.assertEqual(rpc.main(drain_rpc_on_eof=True), 0)
+        responses = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(responses[0]["result"], {"pong": True})
+        self.assertFalse(responses[1]["result"]["running"])
+        self.assertIn("Port", responses[1]["result"]["error"])
+
     def test_invalid_requests_do_not_kill_daemon(self):
         invalid = [None, [], 42, "text", {"id": 5, "method": "ping", "params": []}]
         lines = [json.dumps(value) for value in invalid]
         lines += ['{bad', json.dumps({"id": 7, "method": "ping"})]
         out = io.StringIO()
         with patch.object(sys, "stdin", io.StringIO("\n".join(lines))), patch.object(sys, "stdout", out):
-            self.assertEqual(rpc.main(), 0)
+            self.assertEqual(rpc.main(drain_rpc_on_eof=True), 0)
         responses = [json.loads(line) for line in out.getvalue().splitlines()]
         self.assertEqual(len(responses), 7)
-        self.assertTrue(all("error" in response for response in responses[:-1]))
-        self.assertEqual(responses[-1]["result"], {"pong": True})
+        self.assertTrue(all("error" in response for response in responses if response["id"] != 7))
+        self.assertEqual(next(r for r in responses if r["id"] == 7)["result"], {"pong": True})
 
     def test_model_logging_does_not_corrupt_responses(self):
         def noisy_transcribe(repo, path):

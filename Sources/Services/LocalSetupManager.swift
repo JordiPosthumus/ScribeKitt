@@ -68,6 +68,7 @@ internal final class LocalSetupManager: ObservableObject {
             state = .preparing(.verification)
             try await verify()
             state = .ready
+            if !AppEnvironment.isRunningTests { await LocalSTTSettings.shared.apply() }
         } catch {
             state = .failed(error.localizedDescription)
         }

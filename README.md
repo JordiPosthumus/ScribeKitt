@@ -64,6 +64,28 @@ The installer verifies the archive checksum and app signature, backs up an exist
 
 Updates are manual for now. Pushing source changes to GitHub does not update an installed app.
 
+## Localhost transcription API
+
+The app can share its resident Parakeet model with Hermes and other OpenAI-compatible
+audio clients at `http://127.0.0.1:8111/v1`. It uses the **same cached model in the
+app-owned Python daemon**, with no second model load. Preferences → **Expose localhost
+transcription API** is enabled by default. The port is configurable; `0` chooses a
+free port. Preferences shows the listener status and a **Copy token path** button.
+
+```sh
+curl -H "Authorization: Bearer $(cat "$HOME/Library/Application Support/ScribeKit/stt_server.token")" \
+  -F file=@sample.wav -F model=scribekit-parakeet \
+  http://127.0.0.1:8111/v1/audio/transcriptions
+```
+
+The token is generated locally with owner-only permissions. `GET /healthz` needs
+no token; all `/v1` data endpoints do. The API never loads a model on demand:
+transcription returns **503 until dictation or normal app warmup has loaded it**.
+With the app closed or the setting off, the connection is refused. Requests
+queued behind dictation wait; excess uploads receive **429** with `Retry-After`.
+
+See [the API contract, scheduling details, and validation](docs/LOCALHOST_STT.md).
+
 ## Build
 
 ```sh

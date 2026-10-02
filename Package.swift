@@ -28,7 +28,7 @@ let package = Package(
             name: "AudioWhisperTests",
             dependencies: ["AudioWhisper"],
             path: "Tests",
-            exclude: ["README.md", "test_ml_rpc.py", "test_ml_setup.py", "test_ml_loader.py", "__pycache__", "__Snapshots__"]
+            exclude: ["README.md", "test_ml_rpc.py", "test_ml_setup.py", "test_ml_loader.py", "test_stt_server.py", "__pycache__", "__Snapshots__"]
         )
     ]
 )

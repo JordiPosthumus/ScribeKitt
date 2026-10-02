@@ -42,6 +42,13 @@ def transcribe(repo: str, pcm_path: str) -> Dict[str, Any]:
     except ImportError as exc:
         raise RuntimeError(f"numpy import failed: {exc}") from exc
 
+    model = load_parakeet_model(repo)
+    audio_data = np.fromfile(pcm_path, dtype=np.float32)
+    return {"success": True, "text": transcribe_samples(model, audio_data)}
+
+
+def transcribe_samples(model, audio_data) -> str:
+    """Decode with the caller's model. In particular, HTTP never calls a loader."""
     try:
         import mlx.core as mx
     except ImportError as exc:
@@ -52,13 +59,8 @@ def transcribe(repo: str, pcm_path: str) -> Dict[str, Any]:
     except ImportError as exc:
         raise RuntimeError(f"parakeet_mlx.audio import failed: {exc}") from exc
 
-    model = load_parakeet_model(repo)
-    audio_data = np.fromfile(pcm_path, dtype=np.float32)
-
-    audio_mlx = mx.array(audio_data.astype(np.float32))
+    audio_mlx = mx.array(audio_data.astype("float32"))
     mel = get_logmel(audio_mlx, model.preprocessor_config)
     result = model.generate(mel)
 
-    text = extract_parakeet_text(result)
-    return {"success": True, "text": text}
-
+    return extract_parakeet_text(result)

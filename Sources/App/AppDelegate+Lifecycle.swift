@@ -12,6 +12,7 @@ internal extension AppDelegate {
 
         // Ensure a single, consistent set of defaults before any UI/services read from UserDefaults/AppStorage.
         AppDefaults.register()
+        Task { await LocalSTTSettings.shared.apply() }
 
         do {
             try DataManager.shared.initialize()
@@ -62,6 +63,24 @@ internal extension AppDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false // Keep app running in menu bar
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Give the actor a turn to signal the daemon; never wait for inference.
+        var replied = false
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !replied else { return }
+            replied = true
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        Task { @MainActor in
+            await MLDaemonManager.shared.shutdown()
+            guard !replied else { return }
+            replied = true
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

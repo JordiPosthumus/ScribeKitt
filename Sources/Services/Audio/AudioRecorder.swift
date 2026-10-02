@@ -5,7 +5,20 @@ import os.log
 
 @MainActor
 internal class AudioRecorder: NSObject, ObservableObject {
-    @Published var isRecording = false
+    @Published var isRecording = false {
+        didSet {
+            guard oldValue != isRecording, !AppEnvironment.isRunningTests else { return }
+            // Chain state changes so even a very quick press/release arrives in
+            // order. This also reserves dictation when live preview is disabled.
+            let previous = recordingStateTask
+            let active = isRecording
+            recordingStateTask = Task {
+                await previous?.value
+                await MLDaemonManager.shared.setRecordingActive(active)
+            }
+        }
+    }
+    private var recordingStateTask: Task<Void, Never>?
     @Published var audioLevel: Float = 0.0
     @Published private(set) var audioLevelHistory = Array(repeating: Float(0), count: 48)
     @Published var hasPermission = false

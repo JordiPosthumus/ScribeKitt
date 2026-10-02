@@ -9,4 +9,7 @@ from ml.rpc import main
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # The parent closing stdin is a quit signal, not a request to finish queued
+    # inference. The listener has already drained in main's finally block.
+    import os
+    os._exit(main())

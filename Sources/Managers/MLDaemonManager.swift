@@ -48,6 +48,7 @@ internal actor MLDaemonManager {
     private var nextRequestID: Int = 1
     private var restartAttempts: Int = 0
     private var isShuttingDown = false
+    private var recordingActive = false
     private var stdoutReaderTask: Task<Void, Never>?
     private var pythonExecutable: URL?
     private var scriptLocation: URL?
@@ -56,6 +57,29 @@ internal actor MLDaemonManager {
 #endif
 
     // MARK: - Public API
+
+    struct STTStatus: Decodable {
+        let running: Bool
+        let port: Int?
+        let token_path: String
+        let error: String?
+    }
+
+    func configureSTT(enabled: Bool, port: Int, origins: [String]) async throws -> STTStatus {
+        try await sendRequest(method: "stt_configure", params: [
+            "enabled": enabled, "port": port, "origins": origins
+        ])
+    }
+
+    func sttStatus() async throws -> STTStatus {
+        try await sendRequest(method: "stt_status", params: [:])
+    }
+
+    func setRecordingActive(_ active: Bool) async {
+        recordingActive = active
+        struct Result: Decodable { let success: Bool }
+        let _: Result? = try? await sendRequest(method: "recording_state", params: ["active": active])
+    }
 
     func prepareRuntime() async throws {
         struct Result: Decodable { let pong: Bool }
@@ -265,7 +289,19 @@ internal actor MLDaemonManager {
         let proc = Process()
         proc.executableURL = python
         proc.arguments = [script.path]
-        proc.environment = ProcessInfo.processInfo.environment.merging(["PYTHONUNBUFFERED": "1"]) { _, new in new }
+        let defaults = UserDefaults.standard
+        let origins = defaults.stringArray(forKey: AppDefaults.Keys.localhostSTTOrigins)
+            ?? ["http://127.0.0.1:*", "http://localhost:*"]
+        let originsData = try JSONSerialization.data(withJSONObject: origins)
+        proc.environment = ProcessInfo.processInfo.environment.merging([
+            "PYTHONUNBUFFERED": "1",
+            "SCRIBE_STT_ENABLED": AppEnvironment.isRunningTests ? "0" :
+                ((defaults.object(forKey: AppDefaults.Keys.localhostSTTEnabled) as? Bool ?? true) ? "1" : "0"),
+            "SCRIBE_STT_PORT": String(defaults.object(forKey: AppDefaults.Keys.localhostSTTPort) as? Int ?? 8111),
+            "SCRIBE_STT_ORIGINS": String(decoding: originsData, as: UTF8.self),
+            "SCRIBE_STT_VERSION": VersionInfo.version,
+            "SCRIBE_RECORDING_ACTIVE": recordingActive ? "1" : "0"
+        ]) { _, new in new }
 
         let stdin = Pipe()
         let stdout = Pipe()
@@ -366,6 +402,8 @@ internal actor MLDaemonManager {
 
     func shutdown() async {
         isShuttingDown = true
+        // SIGTERM drains HTTP independently of the model worker. Closing stdin
+        // also handles a parent exiting before this actor gets another turn.
         process?.terminate()
         closePipes()
         process = nil
@@ -428,6 +466,7 @@ internal extension MLDaemonManager {
         restartAttempts = 0
         isShuttingDown = false
         testResponder = nil
+        recordingActive = false
     }
 }
 #endif

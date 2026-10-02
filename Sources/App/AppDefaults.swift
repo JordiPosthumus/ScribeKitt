@@ -20,6 +20,9 @@ internal enum AppDefaults {
         static let immediateRecording = "immediateRecording"
         static let transcriptionStreaming = "transcriptionStreaming"
         static let addTrailingSpace = "addTrailingSpace"
+        static let localhostSTTEnabled = "localhostSTTEnabled"
+        static let localhostSTTPort = "localhostSTTPort"
+        static let localhostSTTOrigins = "localhostSTTOrigins"
         static let globalHotkey = "globalHotkey"
         static let autoBoostMicrophoneVolume = "autoBoostMicrophoneVolume"
 
@@ -53,6 +56,9 @@ internal enum AppDefaults {
             Keys.immediateRecording: false,
             Keys.transcriptionStreaming: true,
             Keys.addTrailingSpace: true,
+            Keys.localhostSTTEnabled: true,
+            Keys.localhostSTTPort: 8111,
+            Keys.localhostSTTOrigins: ["http://127.0.0.1:*", "http://localhost:*"],
             Keys.globalHotkey: defaultGlobalHotkey,
 
             Keys.pressAndHoldEnabled: PressAndHoldConfiguration.defaults.enabled,
