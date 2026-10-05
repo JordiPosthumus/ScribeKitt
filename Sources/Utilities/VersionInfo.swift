@@ -1,7 +1,7 @@
 import Foundation
 
 struct VersionInfo {
-    static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "210.18"
+    static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "210.19"
     static let gitHash = Bundle.main.object(forInfoDictionaryKey: "AudioWhisperGitRevision") as? String ?? "dev-build"
     static let buildDate = Bundle.main.object(forInfoDictionaryKey: "AudioWhisperBuildDate") as? String ?? ""
     

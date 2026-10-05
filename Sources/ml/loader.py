@@ -11,6 +11,9 @@ os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
 MODEL_CACHE: Dict[Tuple[str, str], Any] = {}
+# Distinct repos rarely exceed one; the cap only prevents unbounded growth if
+# future builds ever switch repos inside one daemon lifetime.
+MAX_CACHED_MODELS = 2
 HF_ENV_KEYS = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
 
 
@@ -63,4 +66,30 @@ def load_parakeet_model(repo: str):
     _restore_env(previous)
 
     MODEL_CACHE[cache_key] = model
+    while len(MODEL_CACHE) > MAX_CACHED_MODELS:
+        MODEL_CACHE.pop(next(iter(MODEL_CACHE)))
     return model
+
+
+def configure_memory_limits() -> None:
+    """Bound the Metal allocator cache so finished jobs release GPU memory.
+
+    MLX keeps freed buffers up to a default cache limit that scales with total
+    RAM, so an idle daemon could otherwise stay resident near its historical
+    peak. A quarter of physical memory (max 6 GiB) still covers the resident
+    Parakeet model with working headroom while letting RSS fall after jobs.
+    """
+    try:
+        import mlx.core as mx
+
+        try:
+            total_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        except (ValueError, OSError):
+            total_bytes = 0
+        cache_limit = min(6 * 1024**3, total_bytes // 4) if total_bytes else 4 * 1024**3
+        # Prefer the current top-level API; older MLX only exposes the alias.
+        set_cache_limit = getattr(mx, "set_cache_limit", None) or mx.metal.set_cache_limit
+        set_cache_limit(cache_limit)
+    except Exception:
+        # Non-Metal hosts and older MLX keep the default allocator behavior.
+        pass

@@ -145,6 +145,8 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(body["model_loaded"])
         self.assertEqual(body["version"], "test")
+        self.assertGreater(body["rss_peak_mb"], 0)
+        self.assertIsInstance(body.get("mlx_cache_mb", 0), (int, float))
         self.assertIn("X-Request-Id", headers)
         for path in ("/v1/models", "/v1/audio/transcriptions", "/v1/unknown"):
             self.assertEqual(self.request(path=path, auth=False)[0], 401)
@@ -233,7 +235,7 @@ class HTTPTests(unittest.TestCase):
             self.assertEqual(pending.result(1)[0], 503)
             release.set()
 
-    def test_chunked_transfer_and_disconnect_cancel_waiting_job(self):
+    def test_chunked_transfer_and_peer_gone_still_finishes_the_job(self):
         body, content_type = multipart()
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
         connection.request("POST", "/v1/audio/transcriptions", iter([body[:17], body[17:]]),
@@ -252,9 +254,45 @@ class HTTPTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual(len(self.scheduler.api), 1)
         client.close()
-        while self.scheduler.api and time.monotonic() < deadline:
+        # A fully closed peer no longer abandons the admitted job: the queued
+        # chunk must still run once dictation priority releases. Clearing the
+        # phase-1 result and releasing recording is what makes this a real pin —
+        # without it the assertion below passes on stale residue.
+        self.seen.clear()
+        self.scheduler.set_recording(False)
+        deadline = time.monotonic() + 5
+        while not self.seen and time.monotonic() < deadline:
             time.sleep(0.01)
-        self.assertEqual(len(self.scheduler.api), 0)
+        self.assertEqual(len(self.seen), 1)
+        self.assertEqual(self.seen[0][1], 3200)  # 0.2 s at 16 kHz mono
+        self.assertEqual(self.request()[0], 200)
+
+    def test_pipelined_byte_and_half_close_still_receive_the_response(self):
+        body, content_type = multipart()
+        headers = (f"POST /v1/audio/transcriptions HTTP/1.1\r\nAuthorization: Bearer {self.token}\r\n"
+                   f"Content-Type: {content_type}\r\nContent-Length: {len(body)}\r\n\r\n").encode()
+
+        def read_response(sock):
+            data = b""
+            sock.settimeout(5)
+            while b'"test transcript"' not in data:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+            return data
+
+        # A stray pipelined byte after the body is not a disconnect.
+        client = socket.create_connection(("127.0.0.1", self.port))
+        client.sendall(headers + body + b"{")
+        self.assertIn(b'"test transcript"', read_response(client))
+        client.close()
+        # A client that half-closes its write side is still reading.
+        client = socket.create_connection(("127.0.0.1", self.port))
+        client.sendall(headers + body)
+        client.shutdown(socket.SHUT_WR)
+        self.assertIn(b'"test transcript"', read_response(client))
+        client.close()
 
 
 class AudioTests(unittest.TestCase):

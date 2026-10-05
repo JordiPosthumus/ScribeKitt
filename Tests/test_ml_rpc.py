@@ -2,13 +2,18 @@
 import io
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "Sources"))
 from ml import rpc
+from ml.parakeet import transcribe_path, transcribe_samples
 from ml.preview import PreviewSessions, merge_preview_tokens
+from ml.stt_audio import MAX_SECONDS, SAMPLE_RATE
 from types import SimpleNamespace
 
 
@@ -44,7 +49,7 @@ class RPCRegressionTests(unittest.TestCase):
             return {"success": True, "text": "hello"}
 
         out, err = io.StringIO(), io.StringIO()
-        with patch.object(rpc, "transcribe", noisy_transcribe), patch.object(sys, "stdout", out), patch.object(sys, "stderr", err):
+        with patch.object(rpc, "transcribe_path", noisy_transcribe), patch.object(sys, "stdout", out), patch.object(sys, "stderr", err):
             rpc._handle_request({"id": 1, "method": "transcribe", "params": {"pcm_path": "test.raw"}})
         self.assertEqual(json.loads(out.getvalue())["result"]["text"], "hello")
         self.assertIn("Loading model", err.getvalue())
@@ -59,12 +64,12 @@ class RPCRegressionTests(unittest.TestCase):
         self.assertEqual(responses[1]["result"], {"pong": True})
 
     def test_final_pass_releases_preview_before_transcribing(self):
-        def transcribe(repo, path):
+        def transcribe_path(repo, path):
             self.assertIsNone(rpc.sessions.model)
             return {"success": True, "text": "final"}
         rpc.sessions.session_id = "old"
         rpc.sessions.model = object()
-        with patch.object(rpc, "transcribe", transcribe):
+        with patch.object(rpc, "transcribe_path", transcribe_path):
             self.assertEqual(rpc._execute("transcribe", {"pcm_path": "sample"})["text"], "final")
 
 
@@ -148,6 +153,93 @@ class PreviewTextContinuityTests(unittest.TestCase):
         self.assertEqual(merge_preview_tokens(old, [], 8), old)
         later = [self.token(2, 12)]
         self.assertEqual(merge_preview_tokens(old, later, 8), old + later)
+
+
+class TranscribePathTests(unittest.TestCase):
+    @staticmethod
+    def _fake_decode(calls, text):
+        def decode(model, samples):
+            calls.append(len(samples))
+            return text
+        return decode
+
+    def test_oversize_dictation_is_rejected_before_any_model_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audio.f32"
+            with open(path, "wb") as handle:
+                handle.truncate((MAX_SECONDS + 1) * SAMPLE_RATE * 4)
+            with patch("ml.parakeet.load_parakeet_model",
+                       side_effect=AssertionError("oversize input must never load a model")):
+                with self.assertRaises(ValueError):
+                    transcribe_path("repo", str(path))
+
+    def test_boundary_and_minimum_durations_follow_the_http_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            # Exactly at the bound: accepted (parity with the HTTP path's >).
+            with open(root / "exact.f32", "wb") as handle:
+                handle.truncate(2 * SAMPLE_RATE * 4)
+            with patch("ml.parakeet.MAX_SECONDS", 2), \
+                 patch("ml.parakeet.load_parakeet_model", return_value=object()), \
+                 patch("ml.parakeet.transcribe_samples", return_value="ok"):
+                self.assertEqual(transcribe_path("repo", str(root / "exact.f32"))["text"], "ok")
+            # One sample past the bound: rejected before any model load.
+            with open(root / "over.f32", "wb") as handle:
+                handle.truncate((2 * SAMPLE_RATE + 1) * 4)
+            with patch("ml.parakeet.MAX_SECONDS", 2), \
+                 patch("ml.parakeet.load_parakeet_model",
+                       side_effect=AssertionError("oversize input must never load a model")):
+                with self.assertRaises(ValueError):
+                    transcribe_path("repo", str(root / "over.f32"))
+            # Below the minimum: rejected before any model load.
+            (root / "short.f32").write_bytes(b"\0\0\0\0")
+            with patch("ml.parakeet.load_parakeet_model",
+                       side_effect=AssertionError("sub-minimum input must never load a model")):
+                with self.assertRaises(ValueError):
+                    transcribe_path("repo", str(root / "short.f32"))
+
+    def test_short_dictation_stays_single_pass(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audio.f32"
+            np.zeros(SAMPLE_RATE, dtype="<f4").tofile(path)
+            calls = []
+            result = transcribe_path("repo", str(path), loader=lambda repo: object(),
+                                     transcribe_fn=self._fake_decode(calls, "text"))
+            self.assertEqual(result, {"success": True, "text": "text"})
+            self.assertEqual(calls, [SAMPLE_RATE])
+
+    def test_long_dictation_reuses_the_http_chunking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audio.f32"
+            np.zeros(30 * SAMPLE_RATE, dtype="<f4").tofile(path)
+            calls = []
+            with patch("ml.parakeet.SINGLE_PASS_MAX_SECONDS", 0):
+                result = transcribe_path("repo", str(path), loader=lambda repo: object(),
+                                         transcribe_fn=self._fake_decode(calls, "hello"))
+            self.assertEqual(result, {"success": True, "text": "hello hello"})
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(sum(calls), 30 * SAMPLE_RATE)
+
+
+class TranscribeSamplesTests(unittest.TestCase):
+    def test_finished_decodes_release_the_metal_cache(self):
+        cleared = []
+        model = SimpleNamespace(preprocessor_config=object(), generate=lambda mel: None)
+        # release_gpu_cache prefers the current top-level API and falls back to
+        # the mlx.metal alias on older runtimes; exactly one binding fires.
+        with patch("parakeet_mlx.audio.get_logmel", return_value=object()), \
+             patch("mlx.core.clear_cache", side_effect=lambda: cleared.append(True)), \
+             patch("mlx.core.metal.clear_cache", side_effect=lambda: cleared.append(True)):
+            with patch("ml.parakeet.extract_parakeet_text", return_value="done"):
+                self.assertEqual(transcribe_samples(model, np.zeros(1600, dtype=np.float32)), "done")
+        self.assertEqual(len(cleared), 1)
+
+    def test_missing_mlx_reports_a_friendly_error(self):
+        model = SimpleNamespace(preprocessor_config=object())
+        with patch.dict("sys.modules", {"mlx": None, "mlx.core": None}):
+            with self.assertRaises(RuntimeError) as context:
+                transcribe_samples(model, np.zeros(1600, dtype=np.float32))
+        self.assertIn("mlx.core import failed", str(context.exception))
 
 
 if __name__ == "__main__":

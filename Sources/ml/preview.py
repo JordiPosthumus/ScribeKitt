@@ -11,7 +11,7 @@ import base64
 from typing import Any
 
 from .loader import load_parakeet_model
-from .parakeet import extract_parakeet_text
+from .parakeet import extract_parakeet_text, release_gpu_cache
 
 
 def merge_preview_tokens(previous, incoming, window_start):
@@ -27,8 +27,16 @@ def merge_preview_tokens(previous, incoming, window_start):
     if previous[-1].end <= incoming[0].start:
         return previous + incoming
     best = (0, 0, 0)
-    for i, old in enumerate(previous):
-        if old.end < window_start:
+    # Tokens that ended before the window cannot anchor the join: incoming
+    # tokens start at window_start. Scanning only the recent tail keeps the
+    # per-append cost bounded for hours-long sessions; time-ordered tokens
+    # place all matchable candidates there, and the time-boundary fallback
+    # below already covers the no-anchor case.
+    first = len(previous)
+    while first > 0 and previous[first - 1].end > window_start - 1.0:
+        first -= 1
+    for i in range(first, len(previous)):
+        if previous[i].end < window_start:
             continue
         for j, new in enumerate(incoming):
             run = 0
@@ -84,7 +92,8 @@ class PreviewSessions:
         self.samples_seen += len(samples)
         del self.audio[:max(0, len(self.audio) - 16000 * 4 * 8)]
         # Re-decode the recent window so a bad partial word cannot corrupt later
-        # updates. No attention swaps, stream decoder state, or allocator clears.
+        # updates. No attention swaps or stream decoder state here; the
+        # allocator cache is released at session end, not per update.
         window = np.frombuffer(bytes(self.audio), dtype="<f4")
         mel = get_logmel(mx.array(window), self.model.preprocessor_config)
         result = self.model.generate(mel)
@@ -111,6 +120,7 @@ class PreviewSessions:
             self.tokens = []
             self.session_id = None
             self.sequence = 0
+            release_gpu_cache()
         return {"success": True}
 
 

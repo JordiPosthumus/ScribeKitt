@@ -48,15 +48,15 @@ When upgrading from AudioWhisper or SpeedyWhisper, quit the previous app and rep
 
 ## Install the test build
 
-[ScribeKitt 210.18](https://github.com/JordiPosthumus/ScribeKitt/releases/tag/v210.18) is available as a prebuilt test app. No Xcode or Homebrew is needed. Quit any running ScribeKitt/AudioWhisper app, then paste this into Terminal:
+[ScribeKitt 210.19](https://github.com/JordiPosthumus/ScribeKitt/releases/tag/v210.19) is available as a prebuilt test app. No Xcode or Homebrew is needed. Quit any running ScribeKitt/AudioWhisper app, then paste this into Terminal:
 
 ```bash
 (
   set -e
   installer=$(mktemp -t scribekitt-install)
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/JordiPosthumus/ScribeKitt/v210.18/scripts/install.sh -o "$installer"
-  /bin/bash "$installer" 210.18
+  curl -fsSL https://raw.githubusercontent.com/JordiPosthumus/ScribeKitt/v210.19/scripts/install.sh -o "$installer"
+  /bin/bash "$installer" 210.19
 )
 ```
 

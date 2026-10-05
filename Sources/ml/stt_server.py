@@ -12,8 +12,10 @@ import json
 import os
 from pathlib import Path
 import re
+import resource
 import secrets
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -22,7 +24,7 @@ import uuid
 
 from .loader import MODEL_CACHE
 from .parakeet import DEFAULT_PARAKEET_REPO, transcribe_samples
-from .stt_audio import AudioError, audio_chunks, decode_audio, join_text
+from .stt_audio import SAMPLE_RATE, AudioError, audio_chunks, decode_audio, join_text
 
 MODEL_ID = "parakeet-tdt-0.6b-v2"
 MAX_BODY = 100 * 1024 * 1024
@@ -38,6 +40,32 @@ class HTTPError(Exception):
 def error_body(status, message, code=None):
     return {"error": {"message": message, "type": "invalid_request_error" if status < 500 else "server_error",
                       "code": code or str(status)}}
+
+
+def memory_telemetry() -> dict:
+    """Resident memory and MLX allocator state in MiB; unavailable keys are omitted."""
+    telemetry = {}
+    try:
+        # ru_maxrss is bytes on macOS and kibibytes on Linux.
+        divisor = 1048576 if sys.platform == "darwin" else 1024
+        telemetry["rss_peak_mb"] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / divisor, 1)
+    except Exception:
+        pass
+    try:
+        import mlx.core as mx
+
+        # Prefer the current top-level API; older MLX only exposes the alias.
+        get_active = getattr(mx, "get_active_memory", None) or mx.metal.get_active_memory
+        get_cache = getattr(mx, "get_cache_memory", None) or mx.metal.get_cache_memory
+        telemetry["mlx_active_mb"] = round(get_active() / 1048576, 1)
+        telemetry["mlx_cache_mb"] = round(get_cache() / 1048576, 1)
+    except Exception:
+        pass
+    return telemetry
+
+
+def _log(message: str) -> None:
+    print(f"[stt] {message}", file=sys.stderr, flush=True)
 
 
 def resident_model():
@@ -342,7 +370,7 @@ class STTServer:
             raise HTTPError(400, "response_format must be json or verbose_json")
         pcm = directory / "audio.f32"
         await self.loop.run_in_executor(self.decoder_pool, self.decoder, upload.file, pcm, cancelled)
-        text, queue_ms = "", 0
+        text, queue_ms, chunks = "", 0, 0
         for samples, overlap in audio_chunks(pcm):
             def infer(samples=samples):
                 model = self.model_getter()
@@ -351,7 +379,10 @@ class STTServer:
                 return self.infer(model, samples)
             result, waited = await asyncio.wrap_future(self.scheduler.submit(infer, api=True))
             queue_ms += waited
+            chunks += 1
             text = join_text(text, result, overlap)
+        _log(f"job done: {pcm.stat().st_size // (4 * SAMPLE_RATE)}s audio, {chunks} chunk(s), "
+             f"queue {queue_ms:.0f} ms, {json.dumps(memory_telemetry())}")
         return {"text": text}, queue_ms
 
     async def _client(self, reader, writer):
@@ -393,7 +424,8 @@ class STTServer:
                     raise HTTPError(401, "A valid bearer token is required")
             if method == "GET" and path == "/healthz":
                 body = {"status": "ok", "model_loaded": self.model_getter() is not None,
-                        "uptime_s": int(time.monotonic() - self.started), "version": self.version}
+                        "uptime_s": int(time.monotonic() - self.started), "version": self.version,
+                        **memory_telemetry()}
                 await self._respond(writer, 200, body, request_id, origin)
             elif method == "GET" and path == "/v1/models":
                 data = [] if self.model_getter() is None else [{"id": MODEL_ID, "object": "model", "owned_by": "scribekit"}]
@@ -418,6 +450,18 @@ class STTServer:
                 disconnected = asyncio.create_task(reader.read(1))
                 done, _ = await asyncio.wait((processing, disconnected), return_when=asyncio.FIRST_COMPLETED)
                 if disconnected in done:
+                    # Only EOF means the peer is gone; a pipelined or stray byte
+                    # is not a disconnect, and the connection closes after one
+                    # response so the consumed byte cannot corrupt a later one.
+                    # The job still finishes: a client that half-closed its write
+                    # side is still reading, and a fully closed peer just fails
+                    # the write and cleans up below. A vanished peer's cost is
+                    # bounded by MAX_BODY (about 26 minutes of audio).
+                    body, queue_ms = await processing
+                    try:
+                        await self._respond(writer, 200, body, request_id, origin, queue_ms)
+                    except (OSError, asyncio.TimeoutError):
+                        pass
                     return
                 body, queue_ms = processing.result()
                 await self._respond(writer, 200, body, request_id, origin, queue_ms)

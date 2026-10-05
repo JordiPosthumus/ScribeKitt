@@ -10,8 +10,8 @@ import threading
 from contextlib import nullcontext, redirect_stdout
 from typing import Any, Dict
 
-from .loader import load_parakeet_model
-from .parakeet import DEFAULT_PARAKEET_REPO, transcribe
+from .loader import configure_memory_limits, load_parakeet_model
+from .parakeet import DEFAULT_PARAKEET_REPO, transcribe_path
 from .preview import sessions
 
 _protocol_output = None
@@ -50,7 +50,7 @@ def _execute(method: str, params: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError("pcm_path is required for transcribe")
         # The final pass always owns the model; release only provisional state.
         sessions.clear()
-        return transcribe(repo, pcm_path)
+        return transcribe_path(repo, pcm_path)
     if method == "preview_start":
         return sessions.start(params.get("session_id"), params.get("repo") or DEFAULT_PARAKEET_REPO)
     if method == "preview_audio":
@@ -95,6 +95,8 @@ def main(*, drain_rpc_on_eof=False) -> int:
     global _protocol_output, _scheduler, _server
     from .inference import InferenceScheduler
     from .stt_server import STTServer
+    # Bound the allocator cache for this daemon's lifetime before any load.
+    configure_memory_limits()
     _protocol_output = sys.stdout
     _scheduler = InferenceScheduler()
     _scheduler.set_recording(os.environ.get("SCRIBE_RECORDING_ACTIVE") == "1")

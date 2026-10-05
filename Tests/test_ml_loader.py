@@ -47,6 +47,21 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual({key: os.environ.get(key) for key in before}, before)
         self.assertFalse(MODEL_CACHE)
 
+    def test_cache_evicts_oldest_beyond_the_cap(self):
+        with patch("huggingface_hub.hf_hub_download",
+                   side_effect=lambda repo, name, **kw: str(self.root / name)), \
+             patch("parakeet_mlx.from_pretrained", return_value=object()):
+            for repo in ("example/a", "example/b", "example/c"):
+                load_parakeet_model(repo)
+        self.assertEqual(set(MODEL_CACHE), {("parakeet", "example/b"), ("parakeet", "example/c")})
+
+    def test_memory_limit_configuration_is_exception_safe(self):
+        from ml.loader import configure_memory_limits
+
+        configure_memory_limits()  # real host: must not raise
+        with patch("os.sysconf", side_effect=ValueError("unsupported")):
+            configure_memory_limits()  # fallback path: still must not raise
+
 
 if __name__ == "__main__":
     unittest.main()
