@@ -30,24 +30,49 @@ internal enum TranscriptPresentation {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let maxWidth = max(320, min(1000, available.width - 48))
         let maxHeight = max(220, min(840, available.height - 80))
+        let heightLimit = min(560, maxHeight)
         var panelWidth = min(width, maxWidth)
         func measured(_ value: String, width: CGFloat) -> CGFloat {
             textHeight(value, width: width - sideWidth - 60)
         }
-        // Widen longer dictations before asking the user to scan a tall narrow column.
-        while measured(text, width: panelWidth) + chromeHeight + 16 > min(560, maxHeight), panelWidth < maxWidth {
-            panelWidth = min(maxWidth, panelWidth + 120)
+        // A character-count lower bound on the wrapped line count skips full-text
+        // measurement once the transcript cannot possibly fit the widest panel.
+        // No SF Pro glyph at 15 pt renders narrower than three points, so the
+        // estimate overestimates characters per line and underestimates lines:
+        // it only rejects text that is certain to overflow, and the exact path
+        // below stays authoritative for anything shorter.
+        func cannotFit(_ width: CGFloat) -> Bool {
+            let textWidth = width - sideWidth - 60
+            let maximumCharsPerLine = max(1, Int(textWidth / 3))
+            let minimumLines = (text.count + maximumCharsPerLine - 1) / maximumCharsPerLine
+            return CGFloat(minimumLines) * excerptLineHeight > heightLimit - chromeHeight - 16
         }
-        let panelHeight = min(maxHeight, max(compactHeight, ceil(measured(text, width: panelWidth)) + chromeHeight + 16))
+        let certainToTruncate = cannotFit(maxWidth)
+        if certainToTruncate {
+            panelWidth = maxWidth
+        } else {
+            // Widen longer dictations before asking the user to scan a tall narrow column.
+            while measured(text, width: panelWidth) + chromeHeight + 16 > heightLimit, panelWidth < maxWidth {
+                panelWidth = min(maxWidth, panelWidth + 120)
+            }
+        }
+        let panelHeight = certainToTruncate ? maxHeight
+            : min(maxHeight, max(compactHeight, ceil(measured(text, width: panelWidth)) + chromeHeight + 16))
         let size = CGSize(width: panelWidth, height: panelHeight)
-        guard measured(text, width: panelWidth) + 8 > panelHeight - chromeHeight else {
-            return Layout(size: size, text: text, isTruncated: false)
+        if !certainToTruncate {
+            guard measured(text, width: panelWidth) + 8 > panelHeight - chromeHeight else {
+                return Layout(size: size, text: text, isTruncated: false)
+            }
         }
         // Beyond the screen-sized limit, show a clearly labelled excerpt. Never
         // hide a scrollbar or silently clip a line; clipboard/history keep all text.
         let characters = Array(text)
         let availableHeight = panelHeight - chromeHeight - 34
-        var low = 0, high = characters.count
+        // The excerpt can never exceed the characters that fit the available
+        // lines, so the search starts from that bound instead of the full length.
+        let maximumDisplayedCharacters = max(1, Int(availableHeight / excerptLineHeight)
+            * max(1, Int((panelWidth - sideWidth - 60) / 3)))
+        var low = 0, high = min(characters.count, maximumDisplayedCharacters)
         while low < high {
             let middle = (low + high + 1) / 2
             let candidate = live ? String(characters.suffix(middle)) : String(characters.prefix(middle))
@@ -63,6 +88,10 @@ internal enum TranscriptPresentation {
         }
         return Layout(size: size, text: live ? "…" + excerpt : excerpt + "…", isTruncated: true)
     }
+
+    /// Height of one wrapped 15 pt line with the transcript line spacing; the
+    /// conservative layout bound above and the excerpt search share it.
+    static let excerptLineHeight: CGFloat = textHeight("X", width: 40)
 
     static func textHeight(_ text: String, width: CGFloat) -> CGFloat {
         guard !text.isEmpty else { return 0 }

@@ -108,19 +108,25 @@ internal class AppSetupHelper {
     }
     
     
-    static func cleanupOldTemporaryFiles() {
-        let tempDirectory = FileManager.default.temporaryDirectory
-        
+    static func cleanupOldTemporaryFiles(in directory: URL = FileManager.default.temporaryDirectory) {
         do {
-            let files = try FileManager.default.contentsOfDirectory(at: tempDirectory, includingPropertiesForKeys: [.creationDateKey], options: [])
-            let audioFiles = files.filter { $0.lastPathComponent.hasPrefix("recording_") && $0.pathExtension == "m4a" }
+            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey], options: [])
+            // Finished recordings keep their m4a for retry and Show Audio File
+            // until a day old; raw PCM is single-use transient, so a crash
+            // leftover (potentially hundreds of MB) is reclaimable within an
+            // hour of the crash that orphaned it.
+            let recordingCutoff = Date().addingTimeInterval(-24 * 60 * 60) // 24 hours ago
+            let pcmCutoff = Date().addingTimeInterval(-60 * 60) // 1 hour ago
             
-            let cutoffDate = Date().addingTimeInterval(-24 * 60 * 60) // 24 hours ago
-            
-            for file in audioFiles {
+            for file in files {
+                let name = file.lastPathComponent
+                let isRecording = name.hasPrefix("recording_") && file.pathExtension == "m4a"
+                let isRawPCM = name.hasPrefix("audio_pcm_") && file.pathExtension == "raw"
+                guard isRecording || isRawPCM else { continue }
                 do {
                     let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
-                    if let creationDate = attributes[.creationDate] as? Date, creationDate < cutoffDate {
+                    if let creationDate = attributes[.creationDate] as? Date,
+                        creationDate < (isRecording ? recordingCutoff : pcmCutoff) {
                         try FileManager.default.removeItem(at: file)
                     }
                 } catch {

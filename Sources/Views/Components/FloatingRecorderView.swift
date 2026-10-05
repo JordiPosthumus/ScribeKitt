@@ -20,14 +20,18 @@ internal struct FloatingRecorderView: View {
     @State private var completionGlow = false
     @State private var cachedLayout = TranscriptPresentation.layout(text: "", live: true)
     @State private var transcriptWordCount = 0
+    // The 10 Hz meter re-evaluates this body; caching the concatenated live
+    // transcript keeps those evaluations free of full-transcript allocations.
+    // It changes only when the preview itself changes (about 1 Hz).
+    @State private var liveTranscript = ""
     private let cyan = Color(red: 0.30, green: 0.91, blue: 0.97)
     private let lilac = Color(red: 0.65, green: 0.53, blue: 1)
     private var recording: Bool { if case .recording = status { return true }; return false }
     private var processing: Bool { if case .processing = status { return true }; return false }
-    private var transcript: String { finalText ?? (stableText + draftText) }
+    private var transcript: String { finalText ?? liveTranscript }
     private var layout: TranscriptPresentation.Layout { cachedLayout }
     private var size: CGSize { layout.size }
-    private var hasLiveWords: Bool { !(stableText + draftText).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var hasLiveWords: Bool { !liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var levels: [Double] {
         if reduceMotion { return Array(repeating: AudioLevelDisplay.clamped(audioLevel), count: 48) }
         return waveformSamples.isEmpty ? Array(repeating: 0, count: 48) : waveformSamples.map(AudioLevelDisplay.clamped)
@@ -72,7 +76,12 @@ internal struct FloatingRecorderView: View {
         .onChange(of: finalText) { _, text in refreshLayout(); animateCompletion(text != nil) }
         .onChange(of: transcript) { _, _ in refreshLayout() }
         .onChange(of: availableSize) { _, _ in refreshLayout() }
-        .onAppear { refreshLayout(); if finalText != nil { animateCompletion(true) } }
+        .onChange(of: stableText) { _, _ in liveTranscript = stableText + draftText }
+        .onChange(of: draftText) { _, _ in liveTranscript = stableText + draftText }
+        .onAppear {
+            liveTranscript = stableText + draftText
+            refreshLayout(); if finalText != nil { animateCompletion(true) }
+        }
     }
 
     private func refreshLayout() {

@@ -4,6 +4,32 @@ import AVFoundation
 @testable import AudioWhisper
 
 class UtilityTests: XCTestCase {
+
+    // MARK: - Temporary File Cleanup
+
+    func testCleanupRemovesOrphanedRawPCMButKeepsFreshRecordings() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        func stamp(_ name: String, age: TimeInterval) throws {
+            let url = directory.appendingPathComponent(name)
+            try Data("x".utf8).write(to: url)
+            try FileManager.default.setAttributes([.creationDate: Date().addingTimeInterval(-age)], ofItemAtPath: url.path)
+        }
+        // An orphaned crash leftover is reclaimable; a fresh recording is not.
+        try stamp("audio_pcm_ABCDEF.raw", age: 2 * 60 * 60)
+        try stamp("audio_PCM_lowercase.raw", age: 2 * 60 * 60) // wrong case: untouched
+        try stamp("audio_pcm_GHIJKL.raw", age: 30)
+        try stamp("recording_MNOP.m4a", age: 25 * 60 * 60)     // old recording: reclaimed
+        try stamp("recording_QRST.m4a", age: 60)               // fresh recording: kept
+        try stamp("unrelated.txt", age: 48 * 60 * 60)          // never touched
+
+        AppSetupHelper.cleanupOldTemporaryFiles(in: directory)
+
+        let remaining = Set(try FileManager.default.contentsOfDirectory(atPath: directory.path))
+        XCTAssertEqual(remaining, ["audio_pcm_GHIJKL.raw", "audio_PCM_lowercase.raw", "recording_QRST.m4a", "unrelated.txt"])
+    }
     
     // MARK: - File System Tests
     
