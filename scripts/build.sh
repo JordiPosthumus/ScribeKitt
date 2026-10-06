@@ -331,7 +331,7 @@ else
   # adhoc requirement pins the exact cdhash, which would re-ask for both on
   # each update. A Developer ID remains the stronger option when available.
   echo "🔏 No Developer ID found; adhoc-signing with a stable permission identity."
-  sign_app "-" "adhoc (stable permission identity)" 'designated => identifier "com.audiowhisper.app"'
+  sign_app "-" "adhoc (stable permission identity)" '=designated => identifier "com.audiowhisper.app"'
 fi
 
 # Clean up entitlements file
