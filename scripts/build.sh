@@ -272,6 +272,7 @@ EOF
 sign_app() {
   local identity="$1"
   local identity_name="$2"
+  local requirements="$3"
 
   if [ -n "$identity_name" ]; then
     echo "🔏 Code signing app with: $identity_name ($identity)"
@@ -281,10 +282,18 @@ sign_app() {
 
   # Sign uv binary if present (nested executable)
   if [ -f "ScribeKitt.app/Contents/Resources/bin/uv" ]; then
-    codesign --force --sign "$identity" --options runtime --entitlements AudioWhisper.entitlements ScribeKitt.app/Contents/Resources/bin/uv
+    if [ -n "$requirements" ]; then
+      codesign --force --sign "$identity" --options runtime --entitlements AudioWhisper.entitlements --requirements "$requirements" ScribeKitt.app/Contents/Resources/bin/uv
+    else
+      codesign --force --sign "$identity" --options runtime --entitlements AudioWhisper.entitlements ScribeKitt.app/Contents/Resources/bin/uv
+    fi
   fi
 
-  codesign --force --deep --sign "$identity" --options runtime --entitlements AudioWhisper.entitlements ScribeKitt.app
+  if [ -n "$requirements" ]; then
+    codesign --force --deep --sign "$identity" --options runtime --entitlements AudioWhisper.entitlements --requirements "$requirements" ScribeKitt.app
+  else
+    codesign --force --deep --sign "$identity" --options runtime --entitlements AudioWhisper.entitlements ScribeKitt.app
+  fi
   if [ $? -eq 0 ]; then
     echo "🔍 Verifying signature..."
     codesign --verify --verbose ScribeKitt.app
@@ -316,8 +325,13 @@ fi
 if [ -n "$SIGNING_IDENTITY" ]; then
   sign_app "$SIGNING_IDENTITY" "$SIGNING_NAME"
 else
-  echo "💡 No Developer ID found. App will be unsigned."
-  echo "💡 To sign the app, get a Developer ID certificate from Apple Developer Portal."
+  # Adhoc signing with a stable designated requirement. TCC records
+  # 'identifier "com.audiowhisper.app"' at grant time, so microphone and
+  # recording-key permission grants survive every future build. The default
+  # adhoc requirement pins the exact cdhash, which would re-ask for both on
+  # each update. A Developer ID remains the stronger option when available.
+  echo "🔏 No Developer ID found; adhoc-signing with a stable permission identity."
+  sign_app "-" "adhoc (stable permission identity)" 'designated => identifier "com.audiowhisper.app"'
 fi
 
 # Clean up entitlements file
