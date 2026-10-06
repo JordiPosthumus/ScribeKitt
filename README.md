@@ -62,6 +62,17 @@ When upgrading from AudioWhisper or SpeedyWhisper, quit the previous app and rep
 
 The installer verifies the archive checksum and app signature, backs up an existing ScribeKitt app, installs it, and opens setup. It preserves existing preferences, history, and model files. New defaults apply only where you have not saved a different choice. Start at Login is optional and initially off for new users. The test build is locally signed and has not been Apple-notarized; macOS may require approval in System Settings → Privacy & Security.
 
+### Updating from an older ScribeKitt
+
+Older installs can hold permission grants pinned to a previous build's signature. If the recording key or microphone stops responding after an update — and the toggle in System Settings already looks on — clear the stale entries **once** (quit ScribeKitt first), then reopen and approve both prompts:
+
+```bash
+sudo tccutil reset Accessibility com.audiowhisper.app
+tccutil reset Microphone com.audiowhisper.app
+```
+
+From 210.21 on, grants carry a stable identity that matches every future build, so permissions survive updates and this repair is never needed again. Fresh installs just approve the two prompts on first launch.
+
 Updates are manual for now. Pushing source changes to GitHub does not update an installed app.
 
 ## Localhost transcription API
