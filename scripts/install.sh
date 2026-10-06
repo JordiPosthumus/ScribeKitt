@@ -2,7 +2,21 @@
 # Install a published ScribeKitt build without Xcode, Homebrew, or sudo.
 set -euo pipefail
 
-version="${1:-}"
+version="${1:-latest}"
+if [[ "$(printf '%s' "$version" | tr '[:upper:]' '[:lower:]')" == "latest" ]]; then
+  # Resolve the newest published release (pre-releases included) from the
+  # releases feed, which has no API rate limit. /releases/latest does not
+  # work here because every ScribeKitt release is marked pre-release.
+  feed="$(curl --fail --silent --show-error --location --retry 3 --connect-timeout 20 \
+    "https://github.com/JordiPosthumus/ScribeKitt/releases.atom")"
+  tag="$(printf '%s\n' "$feed" | sed -n 's|.*releases/tag/\(v[0-9][0-9.]*\)".*|\1|p' | head -1)"
+  if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+$ ]]; then
+    echo "Could not determine the latest ScribeKitt release. Install a fixed version instead: bash install.sh 210.21" >&2
+    exit 1
+  fi
+  version="${tag#v}"
+  echo "Latest ScribeKitt release: $version"
+fi
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+$ ]]; then
   echo "Usage: bash install.sh VERSION (for example, 210.15)" >&2
   exit 1
@@ -82,6 +96,10 @@ if ! mv "$staging/ScribeKitt.app" "$target"; then
   exit 1
 fi
 echo "Installed ScribeKitt $version in $destination."
-if [[ -n "$backup" ]]; then echo "Previous app saved in $backup"; fi
-echo "On first launch, choose Prepare ScribeKitt. Allow 6 GB of free space for setup."
+if [[ -n "$backup" ]]; then
+  echo "Previous app saved in $backup"
+  echo "Update complete. If ScribeKitt asks for microphone or recording-key permission, approve it once."
+else
+  echo "On first launch, choose Prepare ScribeKitt. Allow 6 GB of free space for setup."
+fi
 open "$target"
