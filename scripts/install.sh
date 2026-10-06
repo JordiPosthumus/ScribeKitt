@@ -8,8 +8,11 @@ if [[ "$(printf '%s' "$version" | tr '[:upper:]' '[:lower:]')" == "latest" ]]; t
   # releases feed, which has no API rate limit. /releases/latest does not
   # work here because every ScribeKitt release is marked pre-release.
   feed="$(curl --fail --silent --show-error --location --retry 3 --connect-timeout 20 \
-    "https://github.com/JordiPosthumus/ScribeKitt/releases.atom")"
-  tag="$(printf '%s\n' "$feed" | sed -n 's|.*releases/tag/\(v[0-9][0-9.]*\)".*|\1|p' | head -1)"
+    "https://github.com/JordiPosthumus/ScribeKitt/releases.atom")" || {
+    echo "Could not reach GitHub to find the latest ScribeKitt release. Check your connection and try again, or install a fixed version: bash install.sh 210.21" >&2
+    exit 1
+  }
+  tag="$(printf '%s\n' "$feed" | grep -m1 'releases/tag/' | sed -n 's|.*releases/tag/\(v[0-9][0-9.]*\)".*|\1|p')"
   if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+$ ]]; then
     echo "Could not determine the latest ScribeKitt release. Install a fixed version instead: bash install.sh 210.21" >&2
     exit 1

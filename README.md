@@ -25,7 +25,7 @@ The default right-⌘ recording key requires **Accessibility** permission; setup
 
 ScribeKitt requires an **Apple Silicon Mac (M1 or newer)** and macOS 14 or later. The current model supports **English dictation**.
 
-1. Move `ScribeKitt.app` to Applications and open it.
+1. Open ScribeKitt from Applications (the installer opens it for you).
 2. Choose **Prepare ScribeKitt**. Setup prepares Python, downloads the roughly 2.5 GB Parakeet v2 model, and checks offline loading. Allow 6 GB of free space and an internet connection for setup.
 3. Setup shows **Allow Microphone** and **Allow in Settings** for the recording key. In macOS **Privacy & Security → Accessibility**, enable ScribeKitt. If it is missing, use **+** to add the installed app from Applications.
 4. Hold **right ⌘**, speak, release, then paste with **⌘V**. If the key does not respond after granting access, quit ScribeKitt and reopen it.
@@ -44,36 +44,36 @@ Existing installations reuse their model and runtime. If a required microphone o
 
 ScribeKitt focuses on local **Parakeet v2** dictation, live text, and a compact history. File transcription, completion sounds, and microphone boosting are included. It keeps the original project's license and credits.
 
-When upgrading from AudioWhisper or SpeedyWhisper, quit the previous app and replace it. Existing preferences, runtime, and cached models are retained. ScribeKitt uses a dedicated history file at `~/Library/Application Support/AudioWhisper/history.store`; a healthy legacy history is imported automatically with a timestamped backup. The original bundle identifier and support-folder name remain stable. The installed app is `/Applications/ScribeKitt.app`.
+When upgrading from AudioWhisper or SpeedyWhisper, quit the previous app and replace it. Existing preferences, runtime, and cached models are retained. ScribeKitt uses a dedicated history file at `~/Library/Application Support/AudioWhisper/history.store`; a healthy legacy history is imported automatically with a timestamped backup. The original bundle identifier and support-folder name remain stable. The installed app is `/Applications/ScribeKitt.app` (or `~/Applications` when `/Applications` is not writable).
 
-## Install the test build
+## Install and update
 
-[ScribeKitt 210.21](https://github.com/JordiPosthumus/ScribeKitt/releases/tag/v210.21) is available as a prebuilt test app. No Xcode or Homebrew is needed. Quit any running ScribeKitt/AudioWhisper app, then paste this into Terminal:
+Quit any running ScribeKitt, AudioWhisper, or SpeedyWhisper, then paste this into Terminal (⌘-Space, type Terminal, press Return):
 
 ```bash
 (
   set -e
   installer=$(mktemp -t scribekitt-install)
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/JordiPosthumus/ScribeKitt/v210.21/scripts/install.sh -o "$installer"
-  /bin/bash "$installer" 210.21
+  curl -fsSL https://raw.githubusercontent.com/JordiPosthumus/ScribeKitt/master/scripts/install.sh -o "$installer"
+  /bin/bash "$installer" latest
 )
 ```
 
-The installer verifies the archive checksum and app signature, backs up an existing ScribeKitt app, installs it, and opens setup. It preserves existing preferences, history, and model files. New defaults apply only where you have not saved a different choice. Start at Login is optional and initially off for new users. The test build is locally signed and has not been Apple-notarized; macOS may require approval in System Settings → Privacy & Security.
+The same command installs ScribeKitt for the first time and updates it later. It fetches the newest release, checks that the download is intact and correctly signed, backs up an existing app, and preserves your preferences, history, and model. To install a specific version instead, replace `latest` with the version number, for example `210.21`. An Apple Silicon Mac with macOS 14 or newer is required. Release notes for every version live on the [releases page](https://github.com/JordiPosthumus/ScribeKitt/releases).
 
-### Updating from an older ScribeKitt
+**First install:** ScribeKitt opens with a setup window. Choose **Prepare ScribeKitt** for the one-time runtime and model download, then grant the two permissions it asks for: the microphone and the recording key. See [First launch](#first-launch).
 
-Older installs can hold permission grants pinned to a previous build's signature. If the recording key or microphone stops responding after an update — and the toggle in System Settings already looks on — clear the stale entries **once** (quit ScribeKitt first), then reopen and approve both prompts:
+**After an update:** if the setup window appears, grant the two permissions it asks for. Grants issued on 210.21 or later match every future build, so permissions survive updates.
+
+**If the recording key or microphone stops responding after installing or updating ScribeKitt** while its switch in **System Settings → Privacy & Security → Accessibility** (or **Microphone**) already looks on, an older permission entry is pinned to a previous build. Quit ScribeKitt, then clear the old entries. Terminal asks for your Mac login password, and the typing stays hidden:
 
 ```bash
 sudo tccutil reset Accessibility com.audiowhisper.app
 tccutil reset Microphone com.audiowhisper.app
 ```
 
-From 210.21 on, grants carry a stable identity that matches every future build, so permissions survive updates and this repair is never needed again. Fresh installs just approve the two prompts on first launch.
-
-Updates are manual for now. Pushing source changes to GitHub does not update an installed app.
+Reopen ScribeKitt and use the **Allow Microphone** and **Allow in Settings** buttons in the setup window. This repair is needed only on Macs whose permission grant predates 210.21, and then at most once.
 
 ## Localhost transcription API
 
